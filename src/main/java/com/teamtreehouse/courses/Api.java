@@ -1,16 +1,26 @@
 package com.teamtreehouse.courses;
 
 import static spark.Spark.after;
+import static spark.Spark.exception;
 import static spark.Spark.get;
 import static spark.Spark.port;
 import static spark.Spark.post;
 
 import com.google.gson.Gson;
 
+import com.sun.xml.internal.ws.api.pipe.helper.AbstractPipeImpl;
 import com.teamtreehouse.courses.dao.CourseDao;
+import com.teamtreehouse.courses.dao.ReviewDao;
 import com.teamtreehouse.courses.dao.Sql2oCourseDao;
+import com.teamtreehouse.courses.dao.Sql2oReviewDao;
+import com.teamtreehouse.courses.exc.ApiError;
+import com.teamtreehouse.courses.exc.DaoException;
 import com.teamtreehouse.courses.model.Course;
+import com.teamtreehouse.courses.model.Review;
 import org.sql2o.Sql2o;
+
+import java.util.HashMap;
+import java.util.Map;
 
 
 public class Api {
@@ -27,6 +37,7 @@ public class Api {
         String.format("%s;INIT=RUNSCRIPT from 'classpath:db/init.sql'", datasource)
         ,"","");
     CourseDao courseDao = new Sql2oCourseDao(sql2o);
+    ReviewDao reviewDao = new Sql2oReviewDao(sql2o);
     Gson gson = new Gson();
 
     post("/courses", "application/json", (req, res) -> {
@@ -41,10 +52,44 @@ public class Api {
 
     get("/courses/:id", "application/json", (req, res) ->{
       int id = Integer.parseInt(req.params("id"));
-      //TODO: max - What if this is not found?
+
       Course course = courseDao.findById(id);
+
+      if(course == null){
+        throw new ApiError(404,"Could not find course with id: " + id);
+      }
       return  course;
-         }, gson::toJson );
+    }, gson::toJson );
+
+    post("/courses/:courseId/reviews", "application/json", (req, res) -> {
+      int courseId = Integer.parseInt(req.params("courseId"));
+      Review review = gson.fromJson(req.body(), Review.class);
+      review.setCourseId(courseId);
+      try{
+        reviewDao.add(review);
+
+      }catch(DaoException ex) {
+        throw new ApiError(500, ex.getMessage());
+      }
+
+      return review;
+    }, gson::toJson);
+
+    get("/coursses/:courseId/reviews", "application/json", (req, res) ->{
+      int courseId = Integer.parseInt(req.params("courseId"));
+          return reviewDao.findByCourseId(courseId);
+    }, gson::toJson);
+
+    exception(ApiError.class, (exc, req, res) -> {
+      ApiError err = (ApiError) exc;
+      Map<String, Object> jsonMap = new HashMap<>();
+      jsonMap.put("status", err.getStatus());
+      jsonMap.put("errorMessage", err.getMessage());
+      res.type("application/json");
+      res.status(err.getStatus());
+      res.body(gson.toJson(jsonMap));
+
+    });
 
     after((req, res) -> {
       res.type("application/json");
